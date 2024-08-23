@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2024 京都-大阪</title>
+    <script src="lib/jquery/dist/jquery.min.js"></script>
+    <link rel="stylesheet" href="lib/bootstrap-5.3.3-dist/css/bootstrap.min.css">
+    <script src="lib/bootstrap-5.3.3-dist/js/bootstrap.min.js"></script>
+    <link rel="stylesheet" href="lib/font-awesome/css/font-awesome.min.css">
+    <script src="lib/fontawesome-free-6.2.0-web/js/all.min.js"></script>
+    <script src="lib/vue/vue.min.js"></script>
+
+    
+
+    <style>
+        .marker-label       { color: black; font-weight: bolder;}
+
+    </style>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBnOxYye7H7qn3ZJv2lIe3sENG2H-WsTv8&callback=initMap"></script>
+
+</head>
+<body>
+    <div id="map" style="width: 98vw; height: 98vh;"></div>
+
+    <button id="openPanelButton" class="btn btn-info" style="position: absolute; top: 10px; left: 200px;">詳細行程</button>
+    <div id="slidePanel" style="min-width: 375px; position: absolute; width: 375px; height: 100vh; top:0; left: -375px; background-color: white; transition: left 0.5s; overflow-y: auto;">
+        <div style="width:100%; background-color: aquamarine;" class="text-center">
+            <h4>詳細行程</h4>
+        </div>
+        <div class="text-center">
+            <button id="prevButton" v-on:click="prevDay()" class="btn btn-primary">前一天</button>
+            <button id="nextButton" v-on:click="nextDay()" class="btn btn-primary">後一天</button>
+            <button id="allButton" v-on:click="allDay()" class="btn btn-primary">全部</button>
+            <button id="closePanelButton" class="btn btn-danger"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div v-for="(location, index) in displayLocations" style="padding: 10px; border-bottom: 1px solid white;">
+            <div v-on:click="openLocation(location)" class="btn btn-outline-primary" style="font-size: 20px; font-weight: bold;">[{{ location.dayIndex }}]{{ location.dateString }} : <span class="text-danger">{{ location.serial != 0 ? location.serial : '未定' }}</span>. {{ location.name }}</div>
+            <div style="font-size: 16px;">{{ location.address }}</div>
+            <div style="font-size: 16px;">預計抵達:<span class="text-danger" style="font-weight: bold;">{{ location.planTime }}</span> 預計停留:{{ location.duration }}</div>
+            <div v-if="location.note" v-html="location.note" style="color: red; font-weight: bold;">
+            </div>
+            <div v-if="location.images.length > 0">
+                <div :id="'carousel' + location.dayIndex + '-' + index" class="carousel slide" data-bs-ride="carousel">
+                    <div class="carousel-inner">
+                        <div v-for="(image, index) in location.images" :class="['carousel-item', { active: index === 0 }]">
+                            <img v-bind:src="'images/' + image" class="d-block w-100" alt="Image">
+                        </div>
+                    </div>
+                    <button v-if="location.images.length > 1" class="carousel-control-prev" type="button" :data-bs-target="'#carousel' + location.dayIndex + '-' + index" data-bs-slide="prev">
+                        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Previous</span>
+                    </button>
+                    <button v-if="location.images.length > 1" class="carousel-control-next" type="button" :data-bs-target="'#carousel' + location.dayIndex + '-' + index" data-bs-slide="next">
+                        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Next</span>
+                    </button>
+                </div>
+            </div>
+            <div v-if="location.video">
+                <iframe width="100%" height="315" v-bind:src="getEmbedUrl(location.video)" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            </div>
+            <div style="font-size: 16px;">
+                <a :href="'https://www.google.com/search?q=' + location.name" target="_blank" class="btn btn-warning"><i class="fa-brands fa-google"></i>搜尋</a>
+                <a :href="location.url" target="_blank" class="btn btn-warning"><i class="fa-solid fa-link"></i>網站</a>
+                <a class="btn btn-warning" v-bind:href="'https://www.google.com/maps/search/?api=1&query=' + location.lat + ',' + location.lng" target="_blank"><i class="fa-solid fa-map-location-dot"></i>Google地圖</a>
+            </div>
+            <hr />
+        </div>
+
+    </div>
+
+    <script>
+        var map;
+        var firstDate = new Date(2024, 7, 24); // 這邊是 monthIndex 所以 7 代表 8 月
+        var firstSetPosition = false;
+        var ptcggyms = [
+        { name: 'Girafull京都店', lat: 34.98901, lng: 135.75998, address: '600-8211 京都府 京都市下京区真苧屋町195　福井ビル2F', marker: null, gtmInfo: 'https://players.pokemon-card.com/event/search/11037/list'},
+        { name: 'WiZ 京都駅前店', lat: 34.98776, lng: 135.75948, address: '600-8216 京都府 京都市下京区東塩小路町720-1 駿河屋ビルB2', marker: null, gtmInfo: 'https://players.pokemon-card.com/event/search/19199/list'},
+        { name: 'ザウルス', lat: 34.98745, lng: 135.76222, address: '600-8216 京都府 京都市下京区東塩小路町684-4 tissage塩小路2F', marker: null, gtmInfo: 'https://players.pokemon-card.com/event/search/19166/list'},
+        { name: 'GIRAFULL京都河原町店', lat: 35.00598, lng: 135.76748, address: '604-8046 京都府 京都市中京区新京極蛸薬師東側503-16', marker: null, gtmInfo: 'https://players.pokemon-card.com/event/search/18932/list'},
+        { name: 'アメニティードリーム 京都店', lat: 35.00639, lng: 135.76838, address: '604-8041 京都府 京都市中京区蛸薬師通り河原町西入る裏寺町591番地ラウンドアバウト5thビル3階', marker: null, gtmInfo: 'https://players.pokemon-card.com/event/search/12221/list'},
+        ];
+
+        var generalStores = [
+            { name: '全家便利商店 京都塔前店', lat: 34.98791, lng: 135.75996, address: '730 Higashishiokōjichō, Shimogyo Ward, Kyoto, 600-8216日本', marker: null, icon: 'familymart.jpg'},
+            { name: 'Lawson - Kyoto Station Higashi-Shiokoji-cho', lat: 34.98742, lng: 135.76176, address: '558-8 Higashishiokōjichō, Shimogyo Ward, Kyoto, 600-8216日本', marker: null, icon: 'lawson.jpg'},
+            { name: '7-Eleven 京都東洞院七條店', lat: 34.98829, lng: 135.76092, address: '523 Shiokōjichō, Shimogyo Ward, Kyoto, 600-8212日本', marker: null, icon: '711.png'},
+            { name: '樂比亞 京都友都八喜店', lat: 34.9881, lng: 135.75911, address: '590-2 Higashishiokōjichō, Shimogyo Ward, Kyoto, 600-8216日本', marker: null, icon: '10606405.png'},
+            { name: '全家便利商店 天下茶屋一丁目店', lat: 34.64218, lng: 135.49836, address: '1-chōme-29-21 Tengachaya, Nishinari Ward, Osaka, 557-0014日本', marker: null, icon: 'familymart.jpg'},
+            { name: 'Lawson 天下茶屋一丁目店', lat: 34.64258, lng: 135.50071, address: '1-chōme-1-12 Tengachaya, Nishinari Ward, Osaka, 557-0014日本', marker: null, icon: 'lawson.jpg'},
+        ];
+
+        var locations = [
+            {dayIndex: 1, serial: 1, name: '關西國際機場', lat: 34.43203, lng: 135.23669, planTime: '10:30', duration: 'X:XX', type: '機場', images: ['kansiisland.jpg'], address: '1 Senshūkūkōkita, Izumisano, Osaka 549-0001日本', url: 'https://www.kansai-airport.or.jp/', marker: null},
+            {dayIndex: 1, serial: 2, name: '臨空PREMIUM OUTLETS', lat: 34.40646, lng: 135.2954, planTime: '11:32', duration: 'X:XX', type: '購物', images: ['premiumoutlets.jpg', 'premiumoutlets2.jpg'], address: '', url: 'https://www.premiumoutlets.co.jp/rinku/', marker: null},
+            {dayIndex: 1, serial: 3, name: '關西國際機場', lat: 34.43203, lng: 135.23669, planTime: '16:34', duration: 'X:XX', type: '機場', images: [], address: '', url: 'https://www.kansai-airport.or.jp/', marker: null},
+            {dayIndex: 1, serial: 4, name: '京都站東APA飯店', lat: 34.98784, lng: 135.76121, planTime: '19:13', duration: 'X:XX', type: '住宿', images: ['apa1.webp', 'apa2.jpg', 'apa3.jpg'], address: '552-1 Higashishiokōjichō, Shimogyo Ward, Kyoto, 600-8216日本', url: 'https://www.apahotel.com/hotel/kansai/09_kyotoeki-higashi/', marker: null},
+            {dayIndex: 1, serial: 5, name: '挽肉與米 (京都)', lat: 35.00509, lng: 135.77457, planTime: '20:36', duration: 'X:XX', type: '餐廳', images: ['hikinikutocome2.jpg', 'hikinikutocome1.jpg', 'hikinikutocome3.jpg'], address: '363 Kiyomotochō, Higashiyama Ward, Kyoto, 605-0084日本', url: 'https://www.hikinikutocome.com/kyoto', marker: null},
+            {dayIndex: 1, serial: 0, name: '本家 第一旭', lat: 34.98669, lng: 135.7625, planTime: '21:57', duration: 'X:XX', type: '餐廳', images: ['daiichiasahi1.jpg', 'daiichiasahi2.jpg', 'daiichiasahi3.jpg', 'daiichiasahi4.jpg'], address: '845 Higashishiokōji Mukaihatachō, Shimogyo Ward, Kyoto, 600-8213日本', url: 'https://www.honke-daiichiasahi.com/', marker: null},
+            {dayIndex: 1, serial: 0, name: '錦市場', lat: 35.00502, lng: 135.76472, planTime: '23:17', duration: 'X:XX', type: '市集', images: ['nishiki1.jpg', 'nishiki2.jpg', 'nishiki3.jpg'], address: '日本〒604-8055 京都府京都市中京區', url: 'https://www.kyoto-nishiki.or.jp/', marker: null},
+            {dayIndex: 1, serial: 0, name: '新京極商店街振興組合', lat: 35.00709, lng: 135.76718, planTime: 'XX:XX', duration: 'X:XX', type: '市集', images: ['shinkyogoku1.jpg', 'shinkyogoku2.jpg'], address: '日本〒604-8035 Kyoto, Nakagyo Ward, Sakuranochō, ４３８−１ べんてん堂ビル 3F', url: 'https://www.shinkyogoku.or.jp/', marker: null},
+            {dayIndex: 1, serial: 0, name: '錦天滿宮', lat: 35.00504, lng: 135.76729, planTime: 'XX:XX', duration: 'X:XX', type: '市集', images: ['nishikitenmangu1.jpg', 'nishikitenmangu2.jpg'], address: '537 Nakanochō, Nakagyo Ward, Kyoto, 604-8042日本', url: 'https://nishikitenmangu.or.jp/', marker: null},
+            {dayIndex: 1, serial: 0, name: '本能寺', lat: 35.01033, lng: 135.76831, planTime: 'XX:XX', duration: 'X:XX', type: '景點', images: ['honnouji2.jpg', 'honnouji1.jpg'], address: '522 Shimohonnōjimaechō, Nakagyo Ward, Kyoto, 604-8091日本', url: 'https://www.kyoto-honnouji.jp/', marker: null},
+            {dayIndex: 1, serial: 0, name: '祇園町南側 花見小路立碑', lat: 35.00323, lng: 135.775, planTime: 'XX:XX', duration: 'X:XX', type: '景點', images: ['kyoto-gion-kimono.jpg'], address: 'Hanamikoji-dori, Gionmachi Minamigawa, Higashiyama Ward, Kyoto, 日本', url: '', marker: null},
+            {dayIndex: 1, serial: 0, name: '八坂神社', lat: 35.00353, lng: 135.77815, planTime: 'XX:XX', duration: 'X:XX', type: '景點', images: ['yasaka-jinja-18.jpg', 'yasaka-jinja-2.jpg'], address: '日本〒605-0073 Kyoto, Higashiyama Ward, Gionmachi Kitagawa, 625番地 八坂神社', url: '', marker: null},
+            {dayIndex: 1, serial: 0, name: '藍瓶 京都店', lat: 35.01137, lng: 135.78949, planTime: 'XX:XX', duration: 'X:XX', type: '咖啡', images: ['bluebottlecoffee1.jpg', 'bluebottlecoffee2.jpg', 'bluebottlecoffee3.jpg'], address: '', url: 'https://store.bluebottlecoffee.jp/pages/kyoto', marker: null},
+            {dayIndex: 1, serial: 0, name: '寶可夢中心京都店', lat: 35.00341, lng: 135.75838, planTime: 'XX:XX', duration: 'X:XX', type: '寶可夢', images: ['pokemonkyoto1.jpg'], address: '日本〒600-8009 Kyoto, Shimogyo Ward, Kankobokochō, ７８ 京都経済センター SUINA室町2F', url: '', marker: null},
+            {dayIndex: 1, serial: 0, name: '任天堂總公司', lat: 34.96973, lng: 135.7562, planTime: 'XX:XX', duration: 'X:XX', type: '寶可夢', images: ['w644.jfif'], address: '１１−１ Kamitoba Hokodatechō, Minami Ward, Kyoto, 601-8501日本', url: 'https://www.nintendo.com/', marker: null},
+            {dayIndex: 1, serial: 0, name: '任天堂 京都', lat: 35.00352, lng: 135.76825, planTime: 'XX:XX', duration: 'X:XX', type: '寶可夢', images: ['Officialstore04.webp'], address: '日本〒600-8002 Kyoto, Shimogyo Ward, Otabichō, 2丁目３５ 京都髙島屋S.C T8 7F', url: 'https://www.nintendo.com/', marker: null},
+
+            {dayIndex: 2, serial: 1, name: '京都站東APA飯店', lat: 34.98784, lng: 135.76121, planTime: '19:13', duration: 'X:XX', type: '住宿', images: ['apa1.webp', 'apa2.jpg', 'apa3.jpg'], address: '552-1 Higashishiokōjichō, Shimogyo Ward, Kyoto, 600-8216日本', url: 'https://www.apahotel.com/hotel/kansai/09_kyotoeki-higashi/', marker: null},
+            {dayIndex: 2, serial: 2, name: 'VIP Lounge Kyoto', lat: 34.98344, lng: 135.75394, planTime: '09:20', duration: 'X:XX', type: '住宿', images: [], address: '日本〒601-8417 Kyoto, Minami Ward, Nishikujō Toriiguchichō, 6−番地 1F', url: 'https://viplounge.jp/kyoto/lounge/', marker: null},
+            {dayIndex: 2, serial: 3, name: '金閣寺(鹿苑寺)', lat: 35.03937, lng: 135.72924, planTime: '11:20', duration: '00:40', type: '景點', images: ['kinkakuji1.jpg', 'kinkakuji2.jpg'], address: '1 Kinkakujichō, Kita Ward, Kyoto, 603-8361日本', url: 'https://www.shokoku-ji.jp/kinkakuji/', marker: null},
+            {dayIndex: 2, serial: 4, name: '嵐山 竹林小徑', lat: 35.01681, lng: 135.6713, planTime: '13:07', duration: '00:90', type: '景點', images: ['image21.jpg'], address: 'Sagaogurayama Tabuchiyamacho, Ukyo Ward, Kyoto, 616-8394日本', url: 'https://ja.kyoto.travel', marker: null},
+            {dayIndex: 2, serial: 5, name: '三十三間堂', lat: 34.98788, lng: 135.77171, planTime: '14:44', duration: '00:40', type: '景點', images: ['Image33.jpg'], address: '657 Sanjūsangendōmawari, Higashiyama Ward, Kyoto, 605-0941日本', url: 'https://www.sanjusangendo.jp/', marker: null},
+            {dayIndex: 2, serial: 6, name: '清水寺', lat: 34.99466, lng: 135.78466, planTime: '16:20', duration: '00:40', type: '景點', images: ['kiyomizudera1.jpg', 'kiyomizudera2.jpg', 'kiyomizudera3.jpg'], address: '1-chōme-294 Kiyomizu, Higashiyama Ward, Kyoto, 605-0862日本', url: 'https://www.kiyomizudera.or.jp/', marker: null},
+            {dayIndex: 2, serial: 7, name: '三年坂（產寧坂）', lat: 34.99666, lng: 135.781, planTime: '17:27', duration: 'X:XX', type: '景點', images: ['d2img3-1.jpg', 'd2img3-2.jpg'], address: '2-chōme-211 Kiyomizu, Higashiyama Ward, Kyoto, 605-0862日本', url: '', marker: null},
+            {dayIndex: 2, serial: 8, name: '二寧坂(二年坂)', lat: 34.99817, lng: 135.78085, planTime: '18:33', duration: 'X:XX', type: '景點', images: ['d2img2-1.jpg', 'd2img2-2.jpg'], address: '日本〒605-0826 京都府京都市東山区桝屋町清水2丁目', url: 'https://2nenzaka.ne.jp/', marker: null},
+            {dayIndex: 2, serial: 9, name: 'VIP Lounge Kyoto', lat: 34.98344, lng: 135.75394, planTime: '20:21', duration: 'X:XX', type: '住宿', images: [], address: '日本〒601-8417 Kyoto, Minami Ward, Nishikujō Toriiguchichō, 6−番地 1F', url: 'https://viplounge.jp/kyoto/lounge/', marker: null},
+            {dayIndex: 2, serial: 0, name: '京都塔', lat: 34.98752, lng: 135.75925, planTime: '21:21', duration: 'X:XX', type: '景點', images: ['kyototower.jpg'], address: '721-1 Higashishiokōjichō, Shimogyo Ward, Kyoto, 600-8216日本', url: 'https://www.kyoto-tower.jp/', marker: null},
+            {dayIndex: 2, serial: 0, name: '名代豬排', lat: 35.00386, lng: 135.76674, planTime: '22:40', duration: 'X:XX', type: '餐廳', images: ['katsukura1.jpg', 'katsukura2.jpg'], address: '379 Naramonochō, Shimogyo Ward, Kyoto, 600-8004日本', url: 'https://www.katsukura.jp/', marker: null},
+            {dayIndex: 2, serial: 0, name: '八坂神社本殿', lat: 35.00365, lng: 135.77855, planTime: 'XX:XX', duration: 'X:XX', type: '景點', images: ['yasaka-jinja-18.jpg', 'yasaka-jinja-2.jpg'], address: '625 Gionmachi Kitagawa, Higashiyama Ward, Kyoto, 605-0073日本', url: 'https://www.yasaka-jinja.or.jp/', marker: null},
+            {dayIndex: 2, serial: 0, name: '藍瓶 京都店', lat: 35.01137, lng: 135.78949, planTime: 'XX:XX', duration: 'X:XX', type: '咖啡', images: ['bluebottlecoffee1.jpg', 'bluebottlecoffee2.jpg', 'bluebottlecoffee3.jpg'], address: '', url: 'https://store.bluebottlecoffee.jp/pages/kyoto', marker: null},
+
+            {dayIndex: 3, serial: 1, name: '京都站東APA飯店', lat: 34.98784, lng: 135.76121, planTime: '19:13', duration: 'X:XX', type: '住宿', images: ['apa1.webp', 'apa2.jpg', 'apa3.jpg'], address: '552-1 Higashishiokōjichō, Shimogyo Ward, Kyoto, 600-8216日本', url: 'https://www.apahotel.com/hotel/kansai/09_kyotoeki-higashi/', marker: null},
+            {dayIndex: 3, serial: 2, name: '二條城', lat: 35.01403, lng: 135.74842, planTime: '09:24', duration: 'X:XX', type: '景點', images: ['jocastle1.jpg', 'jocastle2.jpg'], address: '541 Nijōjōchō, Nakagyo Ward, Kyoto, 604-8301日本', url: 'https://nijo-jocastle.city.kyoto.lg.jp/', marker: null},
+            {dayIndex: 3, serial: 3, name: '伏見稻荷大社', lat: 34.96769, lng: 135.77918, planTime: '10:52', duration: 'X:XX', type: '景點', images: ['inari1.jpg', 'inari2.jpg'], address: '68 Fukakusa Yabunouchichō, Fushimi Ward, Kyoto, 612-0882日本', url: 'https://inari.jp/', marker: null},
+            {dayIndex: 3, serial: 4, name: '敘敘苑 京都伊勢丹店', lat: 34.9862, lng: 135.75794, planTime: '12:11', duration: 'X:XX', type: '餐廳', images: ['jojoen1.jpg', 'jojoen2.jpg'], address: '日本〒600-8216 Kyoto, Shimogyo Ward, Higashishiokōjichō, ジェイアール京都伊勢丹 7F', url: 'https://www.jojoen.co.jp/shop/jojoen/kyoto-isetan/', marker: null},
+            {dayIndex: 3, serial: 5, name: '日本環球影城 利蓓薾酒店', lat: 34.66117, lng: 135.43275, planTime: '14:04', duration: 'X:XX', type: '住宿', images: ['liber1.jpg', 'liber2.jpg', 'liber3.jpg', 'liber4.jpg'], address: '1-chōme-1-35 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://hotel-liber.jp/', marker: null},
+            {dayIndex: 3, serial: 6, name: '海遊館', lat: 34.65451, lng: 135.42896, planTime: '15:05', duration: 'X:XX', type: '景點', images: ['kaiyukan1.jpg', 'kaiyukan2.jpg', 'kaiyukan3.jpg'], address: '1-chōme-1-10 Kaigandōri, Minato Ward, Osaka, 552-0022日本', url: 'https://www.kaiyukan.com/', marker: null},
+            {dayIndex: 3, serial: 7, name: '帆船型觀光船 聖瑪麗亞號', lat: 34.65494, lng: 135.42843, planTime: '17:07', duration: 'X:XX', type: '景點', images: ['boat1.jpg', 'boat2.webp'], address: '1-chōme-1-10 Kaigandōri, Minato Ward, Osaka, 552-0022日本', url: 'https://suijo-bus.osaka/', marker: null},
+            {dayIndex: 3, serial: 8, name: '天保山購物中心', lat: 34.65585, lng: 135.4302, planTime: '18:11', duration: 'X:XX', type: '住宿', images: ['kaiyukanmarket1.jpg', 'kaiyukanmarket2.jpg', 'kaiyukanmarket3.jpg'], address: '1-chōme-1-10 Kaigandōri, Minato Ward, Osaka, 552-0022日本', url: 'https://www.kaiyukan.com/thv/marketplace/', marker: null},
+            {dayIndex: 3, serial: 9, name: '北極星 天保山店', lat: 34.65624, lng: 135.43041, planTime: '19:13', duration: 'X:XX', type: '餐廳', images: ['1373214239-4244522052.jpg'], address: '1-chōme-1-10 Kaigandōri, Minato Ward, Osaka, 552-0022日本', url: 'https://www.hokkyokusei.online/', marker: null},
+            {dayIndex: 3, serial: 10, name: '天保山大摩天輪', lat: 34.65626, lng: 135.43096, planTime: '20:14', duration: 'X:XX', type: '景點', images: ['20210306113424_20.jpg'], address: '1-chōme-1-10 Kaigandōri, Minato Ward, Osaka, 552-0022日本', url: 'http://tempozan-kanransya.com/tempozan-kanransya.com/', marker: null},
+
+            {dayIndex: 4, serial: 1, name: '日本環球影城', lat: 34.66567, lng: 135.43231, planTime: '07:00', duration: 'X:XX', type: '最愛', images: [], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null},
+            {dayIndex: 4, serial: 2, name: '瑪利歐賽車︰庫巴的挑戰書', lat: 34.66804, lng: 135.42992, planTime: '09:50', duration: '00:30', type: '最愛', images: ['bf746310-6781-11eb-bb3f-b4c2557bca12.jfif'], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null},
+            {dayIndex: 4, serial: 0, name: '奇諾比奧咖啡店', lat: 34.66788, lng: 135.43019, planTime: 'XX:XX', duration: '00:30', type: '餐廳', images: ['toadcoffee1.webp', 'toadcoffee2.webp'], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null, note: '預約方式：<br />在入口處的「綠色水管」隧道那邊掃描預約<br />選擇LINE預約<br />餐廳選擇「キノピオ・カフェ™」<br />選擇預約時段<br />預約名子打英文<br />在line上可以查詢預約資料<br />'},
+            {dayIndex: 4, serial: 0, name: '飛天翼龍', lat: 34.66424, lng: 135.43071, planTime: 'XX:XX', duration: '00:30', type: '最愛', images: ['id103834017-1.jpg'], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null, video: 'https://www.youtube.com/watch?v=akUb6jW5LIk'},
+            {dayIndex: 4, serial: 3, name: '鬼滅の刃 XR乘車遊', lat: 34.66532, lng: 135.43562, planTime: '13:50', duration: '00:30', type: '最愛', images: ['ca03a0a0-e2b7-11eb-bfda-6bd477829e59.jfif'], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null},
+            {dayIndex: 4, serial: 4, name: '哈利波特的魔法世界', lat: 34.66803, lng: 135.43169, planTime: '16:10', duration: 'X:XX', type: '最愛', images: [], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null},
+            {dayIndex: 4, serial: 5, name: '哈利波特禁忌之旅', lat: 34.66868, lng: 135.43173, planTime: '16:30', duration: '00:30', type: '最愛', images: ['20190202115135335.jpg'], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null},
+            {dayIndex: 4, serial: 0, name: '大白鯊', lat: 34.66618, lng: 135.43175, planTime: 'XX:XX', duration: '00:30', type: '最愛', images: ['1427183817-792921611_wn.jpg'], address: '2-chōme-1-33 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://www.usj.co.jp/', marker: null, video: 'https://www.youtube.com/watch?v=5v4IUJw4SH8'},
+            {dayIndex: 4, serial: 6, name: 'Shake Shack TheParkFront飯店店', lat: 34.66774, lng: 135.43714, planTime: '19:07', duration: 'X:XX', type: '餐廳', images: ['shakeshack1.jpg', 'shakeshack2.jpg'], address: '日本〒554-0024 Osaka, Konohana Ward, Shimaya, 6-chōme−2−５２ ザパークフロントホテルアットユニバーサル・スタジオ・ジャパン ３０５ 内', url: 'https://shakeshack.jp/locations/theparkfronthotel/', marker: null},
+            {dayIndex: 4, serial: 7, name: '日本環球影城 利蓓薾酒店', lat: 34.66117, lng: 135.43275, planTime: '20:21', duration: 'X:XX', type: '住宿', images: ['liber1.jpg', 'liber2.jpg', 'liber3.jpg', 'liber4.jpg'], address: '1-chōme-1-35 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://hotel-liber.jp/', marker: null},
+
+            {dayIndex: 5, serial: 1, name: '日本環球影城 利蓓薾酒店', lat: 34.66117, lng: 135.43275, planTime: '20:21', duration: 'X:XX', type: '住宿', images: ['liber1.jpg', 'liber2.jpg', 'liber3.jpg', 'liber4.jpg'], address: '1-chōme-1-35 Sakurajima, Konohana Ward, Osaka, 554-0031日本', url: 'https://hotel-liber.jp/', marker: null},
+            {dayIndex: 5, serial: 2, name: 'HARBS 大丸梅田店', lat: 34.70134, lng: 135.49608, planTime: '10:22', duration: 'X:XX', type: '餐廳', images: ['harbs1.jpg', 'harbs2.jpg'], address: '日本〒530-0001 Osaka, 北区Kita Ward, Umeda, 3-chōme−1−１ 大丸梅田店 6F', url: 'https://www.harbs.co.jp/zh-TW', marker: null},
+            {dayIndex: 5, serial: 3, name: '寶可夢中心 大丸梅田店', lat: 34.70185, lng: 135.49655, planTime: '11:25', duration: 'X:XX', type: '寶可夢', images: ['pokemonmt1.webp'], address: '日本〒530-8202 Osaka, Kita Ward, Umeda, 3-chōme−1−１ 大丸梅田店 13F', url: 'https://www.pokemon.co.jp/shop/pokecen/osaka/', marker: null},
+            {dayIndex: 5, serial: 4, name: '敘敘苑 LUCUA大阪店', lat: 34.70324, lng: 135.49565, planTime: '14:31', duration: 'X:XX', type: '餐廳', images: ['jojoen2.jpg'], address: '日本〒530-0001 Osaka, Kita Ward, Umeda, 3-chōme−1−３ ルクア 10F', url: 'https://www.jojoen.co.jp/shop/jojoen/lucua/', marker: null},
+            {dayIndex: 5, serial: 5, name: '阪神百貨 梅田本店', lat: 34.70127, lng: 135.49831, planTime: '15:38', duration: 'X:XX', type: '購物', images: ['hanshin1.jpg'], address: '1-chōme-13-13 Umeda, Kita Ward, Osaka, 530-8224日本', url: 'https://www.hanshin-dept.jp/hshonten/', marker: null},
+            {dayIndex: 5, serial: 6, name: '友都八喜相機多媒體 梅田店', lat: 34.70409, lng: 135.49626, planTime: '16:44', duration: 'X:XX', type: '購物', images: ['a2000107_parts_5d074b7c9ca50.webp'], address: '1-1 Ōfukachō, Kita Ward, Osaka, 530-0011日本', url: 'https://www.yodobashi.com/ec/store/0081/', marker: null},
+            {dayIndex: 5, serial: 7, name: 'HEP FIVE 摩天輪', lat: 34.70381, lng: 135.49996, planTime: '17:20', duration: 'X:XX', type: '景點', images: ['hepfive1.webp'], address: '日本〒530-0017 Osaka, Kita Ward, Kakudachō, 5−１５ HEP FIVE 7F', url: 'https://www.hepfive.jp/ferriswheel', marker: null},
+            {dayIndex: 5, serial: 8, name: 'とんかつ 和幸 LINKS UMEDA 店', lat: 34.70459, lng: 135.49619, planTime: '17:58', duration: 'X:XX', type: '餐廳', images: ['o2560192015347758669.jpg', '640x640_rect_44000bb4dd6c53e07dddf5a6e73c8bc9.jpg'], address: '日本〒530-0011 Osaka, Kita Ward, Ōfukachō, 1−１, Yodobashi Umeda Tower, 8F', url: 'https://wako-group.co.jp/shop/detai/shop_1180/', marker: null},
+            {dayIndex: 5, serial: 9, name: '梅田空中庭園', lat: 34.7053, lng: 135.49053, planTime: '19:12', duration: 'X:XX', type: '住宿', images: ['53330977062_5e0e8f48d4_b.jpg', '516cbd23b64a854025e0f4fd3a64c325.jfif'], address: '日本〒531-6039 Osaka, Kita Ward, Ōyodonaka, 1-chōme−1−８８ 梅田スカイビル', url: 'https://www.skybldg.co.jp/observatory/', marker: null},
+            {dayIndex: 5, serial: 10, name: 'YAKINIKU KIYOMIZU HALL焼肉の殿堂', lat: 34.70367, lng: 135.491, planTime: '20:16', duration: 'X:XX', type: '餐廳', images: ['e28970bb8194b357fa980ead4cc8d675.jpg'], address: '1-chōme-1-16 Ōyodominami, Kita Ward, Osaka, 531-0075日本', url: 'https://tabelog.com/osaka', marker: null},
+            {dayIndex: 5, serial: 11, name: '民宿 1-chōme-20-3 Tengachaya', lat: 34.64224, lng: 135.49909, planTime: '21:50', duration: 'X:XX', type: '住宿', images: ['06953a15dd2f18dcb4a6b4cd08e618d4.webp'], address: '1-chōme-20-3 Tengachaya, Nishinari Ward, Osaka, 557-0014日本', url: '', marker: null},
+
+            {dayIndex: 6, serial: 1, name: '民宿 1-chōme-20-3 Tengachaya', lat: 34.64224, lng: 135.49909, planTime: '09:00', duration: 'X:XX', type: '住宿', images: ['06953a15dd2f18dcb4a6b4cd08e618d4.webp'], address: '1-chōme-20-3 Tengachaya, Nishinari Ward, Osaka, 557-0014日本', url: '', marker: null},
+            {dayIndex: 6, serial: 2, name: '難波八阪神社', lat: 34.66155, lng: 135.4967, planTime: '10:16', duration: 'X:XX', type: '景點', images: ['C20231018213931637.jpg', '20191122144050_10.jpg'], address: '2-chōme-9-19 Motomachi, Naniwa Ward, Osaka, 556-0016日本', url: 'https://nambayasaka.jp/', marker: null},
+            {dayIndex: 6, serial: 3, name: '大阪城', lat: 34.68963, lng: 135.5301, planTime: '11:12', duration: 'X:XX', type: '景點', images: ['osaka-johall1.webp', '14-50383.webp'], address: '3-1 Ōsakajō, Chuo Ward, Osaka, 540-0002日本', url: 'https://www.osaka-johall.com/', marker: null},
+            {dayIndex: 6, serial: 4, name: '高島屋 大阪店', lat: 34.6646, lng: 135.50126, planTime: '12:34', duration: 'X:XX', type: '購物', images: ['Takashimaya_870.jpg'], address: '5-chōme-1-5 Namba, Chuo Ward, Osaka, 542-8510日本', url: 'https://www.takashimaya.co.jp/osaka/', marker: null},
+            {dayIndex: 6, serial: 5, name: '道頓堀', lat: 34.66864, lng: 135.50309, planTime: '13:43', duration: 'X:XX', type: '景點', images: ['20230926_162903_bf6866e1_w1920.webp'], address: 'Dotonbori, Chuo Ward, Osaka, 542-0071日本', url: 'AAA', marker: null},
+            {dayIndex: 6, serial: 6, name: '道頓堀大観覧車', lat: 34.66924, lng: 135.50274, planTime: '14:46', duration: 'X:XX', type: '景點', images: ['pic_dotonbori-ebisutower01.jpg'], address: '7-13 Souemonchō, Chuo Ward, Osaka, 542-0084日本', url: 'https://www.donki.com/kanransha/', marker: null},
+            {dayIndex: 6, serial: 7, name: '一蘭 道頓堀店本館', lat: 34.6692, lng: 135.50303, planTime: '15:47', duration: 'X:XX', type: '餐廳', images: ['images.jfif', 'douton_hon_1.jpg'], address: '日本〒542-0084 Osaka, Chuo Ward, Souemonchō, 7−１８ (㈱)田舎そばビル', url: 'https://ichiran.com/shop/kinki/dotonbori-main/', marker: null},
+            {dayIndex: 6, serial: 8, name: 'GU 心齋橋店', lat: 34.67125, lng: 135.50161, planTime: '16:53', duration: 'X:XX', type: '購物', images: ['20161008003336_6.jpg'], address: '2-chōme-1-17 Shinsaibashisuji, Chuo Ward, Osaka, 542-0085日本', url: 'https://map.gu-global.com/jp/ja/detail/10100135', marker: null},
+            {dayIndex: 6, serial: 9, name: '優衣庫 心齋橋筋商店街店', lat: 34.67125, lng: 135.50158, planTime: '17:54', duration: 'X:XX', type: '購物', images: ['shinsaibashi-16.jpg'], address: '2-chōme-1-17 Shinsaibashisuji, Chuo Ward, Osaka, 542-0085日本', url: 'https://map.uniqlo.com/jp/ja/detail/10101733', marker: null},
+            {dayIndex: 6, serial: 10, name: 'Shinsaibashisuji心齋橋商店街', lat: 34.67242, lng: 135.50103, planTime: '18:57', duration: 'X:XX', type: '購物', images: ['20240319155438_0.webp', '20240319155436_0.jpg'], address: 'Shinsaibashisuji, Chuo Ward, Osaka, 542-0085日本', url: '', marker: null},
+            {dayIndex: 6, serial: 11, name: '寶可夢中心 大阪店 DX', lat: 34.67317, lng: 135.50075, planTime: '19:59', duration: 'X:XX', type: '寶可夢', images: ['2023-04-28-221635-32.webp'], address: '日本〒542-8501 Osaka, Chuo Ward, Shinsaibashisuji, 1-chōme−7−１, Main Building, 9F 大丸心齋橋店 本館', url: 'https://www.pokemon.co.jp/shop/pokecen/osakadx/', marker: null},
+            {dayIndex: 6, serial: 12, name: 'OS Drug 藥妝-心齋橋店', lat: 34.67449, lng: 135.50147, planTime: '21:02', duration: 'X:XX', type: '購物', images: ['1522640469-72bedeb22dca5e7a6319165f3003d2d4.jpg'], address: '1-chōme-2-15 Shinsaibashisuji, Chuo Ward, Osaka, 542-0085日本', url: 'http://www.osdrug.com/', marker: null},
+            {dayIndex: 6, serial: 13, name: '心齋橋筋', lat: 34.67242, lng: 135.50103, planTime: '22:04', duration: 'X:XX', type: '景點', images: ['20240319155436_0.jpg'], address: 'Shinsaibashisuji, Chuo Ward, Osaka, 542-0085日本', url: '', marker: null},
+
+            {dayIndex: 7, serial: 1, name: '民宿 1-chōme-20-3 Tengachaya', lat: 34.64224, lng: 135.49909, planTime: '10:00', duration: 'X:XX', type: '住宿', images: ['06953a15dd2f18dcb4a6b4cd08e618d4.webp'], address: '1-chōme-20-3 Tengachaya, Nishinari Ward, Osaka, 557-0014日本', url: '', marker: null},
+            {dayIndex: 7, serial: 2, name: '黑門市場', lat: 34.66535, lng: 135.50622, planTime: '12:16', duration: 'X:XX', type: '購物', images: ['ko0etklozoker3yfhcrs.webp', 'pp920ajns6fiectmzlwn.webp'], address: '2 Chome-21 Nipponbashi, Chuo Ward, Osaka, 542-0073日本', url: 'https://kuromon.com/jp/', marker: null},
+            {dayIndex: 7, serial: 3, name: '魚豊', lat: 34.66456, lng: 135.50685, planTime: '13:18', duration: 'X:XX', type: '餐廳', images: ['1P6A7080.jpg.webp', '1P6A7092.jpg.webp', '1P6A7118.jpg.webp'], address: '2-chōme-11-21 Nipponbashi, Chuo Ward, Osaka, 542-0073日本', url: '', marker: null},
+            {dayIndex: 7, serial: 4, name: '大阪市天王寺動物園', lat: 34.65109, lng: 135.50843, planTime: '14:33', duration: 'X:XX', type: '景點', images: ['20180227100737_17.jpg', '20180227100702_100.jpg', '20180227100728_7.jpg'], address: '1-108 Chausuyamachō, Tennoji Ward, Osaka, 543-0063日本', url: 'https://www.tennojizoo.jp/', marker: null},
+            {dayIndex: 7, serial: 5, name: '通天閣', lat: 34.65249, lng: 135.5063, planTime: '16:46', duration: 'X:XX', type: '景點', images: ['20230721_161251_3e1c08a0_w1920.webp', 'DSC_1428.webp'], address: '1-chōme-18-6 Ebisuhigashi, Naniwa Ward, Osaka, 556-0002日本', url: 'https://www.tsutenkaku.co.jp/', marker: null, note: '要登上通天閣的展望台的話，和一般展望台略微不同。要到通天閣的「展望台入口」(如照片)，首先要先下到地下室買票。接著再搭電梯到4、5F的展望台。'},
+            {dayIndex: 7, serial: 6, name: '通天閣南本通り商店街', lat: 34.65197, lng: 135.5061, planTime: '17:17', duration: 'X:XX', type: '購物', images: ['DSCF9395.jpg.webp'], address: '2 Chome-3 Ebisuhigashi, Naniwa Ward, Osaka, 556-0002日本', url: '', marker: null},
+            {dayIndex: 7, serial: 7, name: 'Harukas300展望台', lat: 34.6463, lng: 135.5133, planTime: '18:00', duration: 'X:XX', type: '景點', images: ['20190913011701_14.webp', 'edee85d83a829ac9d12b9247f4588aec.jpg', '90c7ed5d50a73a626d8a1d58e8f8ecc9.jpg'], address: '1-chōme-1-43 Abenosuji, Abeno Ward, Osaka, 545-0052日本', url: 'https://www.abenoharukas-300.jp/', marker: null},
+
+            {dayIndex: 8, serial: 1, name: '民宿 1-chōme-20-3 Tengachaya', lat: 34.64224, lng: 135.49909, planTime: '10:00', duration: 'X:XX', type: '住宿', images: ['06953a15dd2f18dcb4a6b4cd08e618d4.webp'], address: '1-chōme-20-3 Tengachaya, Nishinari Ward, Osaka, 557-0014日本', url: '', marker: null},
+            {dayIndex: 8, serial: 2, name: '大阪國際機場(伊丹機場)', lat: 34.79141, lng: 135.44105, planTime: '09:30', duration: 'X:XX', type: '機場', images: ['4b85fa4a1ff3436c8df34cfe84cf9c45_th.jpeg'], address: '3-chōme-555 Hotarugaike Nishimachi, Toyonaka, Osaka 560-0036日本', url: 'https://www.osaka-airport.co.jp/', marker: null},
+
+        ];
+
+        var markerIconCoords = {
+            '機場': { origin: new google.maps.Point(41, 146), fa: 'plane' },
+            '住宿': { origin: new google.maps.Point(383, 373), fa: 'hotel'},
+            '景點': { origin: new google.maps.Point(164, 30), fa: 'camera'},
+            '餐廳': { origin: new google.maps.Point(656, 35), fa: 'utensils'},
+            '市集': { origin: new google.maps.Point(1118, 153), fa: 'shop'},
+            '咖啡': { origin: new google.maps.Point(656, 253), fa: 'mug-saucer'},
+            '購物': { origin: new google.maps.Point(506, 258), fa: 'shop'},
+            '最愛': { origin: new google.maps.Point(506, 485), fa: 'heart'},
+            '寶可夢': { origin: new google.maps.Point(273, 259), fa: 'circle'},
+        };
+
+
+        function initMap() {
+            // Create a map object and specify the DOM element for display
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: {lat: 34.98784, lng: 135.76121},
+                zoom: 14
+            });
+
+            for (let i = 0; i < generalStores.length; i++) {
+                let smarker = new google.maps.Marker({
+                    position: {lat: generalStores[i].lat, lng: generalStores[i].lng},
+                    map: map,
+                    title: generalStores[i].name,
+                    zIndex: 99999999,
+                    icon: {
+                        url: 'images/' + generalStores[i].icon,
+                        //anchor: new google.maps.Point(174, 200),
+                        scaledSize: new google.maps.Size(80, 80)
+                    }
+                });
+            }
+
+            for (var i = 0; i < ptcggyms.length; i++) {
+                var _gym = ptcggyms[i];
+                let gmarker = new google.maps.Marker({
+                    position: {lat: _gym.lat, lng: _gym.lng},
+                    map: map,
+                    title: "GYM",
+                    zIndex: 99999999,
+                    icon: {
+                        url: 'images/gym1.png',
+                        //anchor: new google.maps.Point(174, 200),
+                        //scaledSize: new google.maps.Size(100, 100)
+                    }
+                });
+
+                let contentString = '<div id="content">' +
+                        '<h2>' + _gym.name + '</h2>' +
+                        '<p>' + _gym.address + '</p>' +
+                        '<p class="h4">' + '<a href="' + _gym.gtmInfo + '" target="_blank">比賽資訊</a>' + '</p>' +
+                        '</div>';
+
+                const iw = new google.maps.InfoWindow({
+                        content: contentString,
+                        //size: new google.maps.Size(50, 50)
+                    });
+
+
+                gmarker.addListener("click", () => {
+                    iw.open({
+                           anchor: gmarker,
+                           map,
+                       });
+                });
+
+                ptcggyms[i].marker = gmarker;
+            }
+
+            for (var i = 0; i < locations.length; i++) {
+                        var _location = locations[i];
+                        var marker = new google.maps.Marker({
+                            position: {lat: _location.lat, lng: _location.lng},
+                            map: map,
+                            title: _location.serial + '. ' + _location.name,
+                            label: {
+                                text: (_location.serial > 0 ? _location.serial + '.' : ' ') + _location.name, // 顯示速度
+                                fontFamily: 'Arial',
+                                className: 'marker-label',
+                                color: '#000000',
+                                fontSize: '20px',
+                                bold: true
+                            },
+                        zIndex: 99999999,
+                        icon: {
+                        url: 'images/markericons60.png',
+                        size: new google.maps.Size(66, 90),
+                        origin: markerIconCoords[_location.type].origin,
+                        //anchor: new google.maps.Point(174, 200),
+                        //scaledSize: new google.maps.Size(100, 100)
+                    }
+
+                    
+                });
+
+                locations[i].marker = marker;
+
+            }
+
+            console.log(locations);
+
+            app.setMarkersVisible(1);
+            
+            // 定位功能
+            /*
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(function(position) {
+                    var pos = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+
+                    // Create a marker and set its position
+                    var marker = new google.maps.Marker({
+                        map: map,
+                        position: pos,
+                        title: 'Current Location'
+                    });
+
+                    // 第一次執行才跳至定位到目前位置
+                    if (firstSetPosition == false) {
+                        map.setCenter(pos);
+                        firstSetPosition = true;
+                    }
+                    // Center the map on the current position
+                    //
+                }, function() {
+                    // Handle geolocation errors
+                    alert('Error: The Geolocation service failed.');
+                });
+            } else {
+                // Browser doesn't support geolocation
+                alert('Error: Your browser doesn\'t support geolocation.');
+            }
+                */
+        }
+        
+
+        window.onload = initMap;
+
+        $(document).ready(function() {
+            $('#openPanelButton').click(function () {
+                var panel = document.getElementById("slidePanel");
+                if (panel.style.left === "-375px") {
+                    panel.style.left = "0px";
+                } else {
+                    panel.style.left = "-375px";
+                }
+            });
+
+            $('#closePanelButton').click(function () {
+                var panel = document.getElementById("slidePanel");
+                panel.style.left = "-375px";
+            });
+
+        });
+
+        var app = new Vue({
+            el: '#slidePanel',
+            data: {
+                displayLocations: [],
+                selectedDayIndex: 1
+            },
+            created: function() {
+                //this.displayLocations = locations;
+
+                for (let i = 0; i < locations.length; i++) {
+                    locations[i].fa = markerIconCoords[locations[i].type].fa;
+                    let d = new Date(firstDate.getTime() + (locations[i].dayIndex - 1) * 24 * 60 * 60 * 1000);
+                    locations[i].dateString = d.toLocaleDateString().substr(5);
+                    //console.log(d.toLocaleDateString());
+                    //locations[i].dateString = new Date(firstDate.getTime() + (location.dayIndex - 1) * 24 * 60 * 60 * 1000).toLocaleDateString();
+                }
+
+                this.displayLocations = locations.filter(location => location.dayIndex === this.selectedDayIndex);
+                //this.putMarkers();
+            },
+            methods: {
+                openLocation: function(location) {
+                    // 點側邊標題時，地圖移動到該地點
+                    var pos = {
+                        lat: location.lat,
+                        lng: location.lng
+                    };
+                    map.setCenter(pos);
+                    map.setZoom(16);
+
+                    // 關閉 Panel
+                    var panel = document.getElementById("slidePanel");
+                    panel.style.left = "-375px";
+
+                },
+                nextDay: function() {
+                    this.displayLocations = [];
+                    this.selectedDayIndex++;
+
+                    if (this.selectedDayIndex > 8) {
+                        this.selectedDayIndex = 8;
+                    }
+                    this.displayLocations = locations.filter(location => location.dayIndex === this.selectedDayIndex);
+                    this.setMarkersVisible(this.selectedDayIndex);
+                },
+                prevDay: function() {
+                    this.displayLocations = [];
+                    this.selectedDayIndex--;
+
+                    if (this.selectedDayIndex < 1) {
+                        this.selectedDayIndex = 1;
+                    }
+                    this.displayLocations = locations.filter(location => location.dayIndex === this.selectedDayIndex);
+                    this.setMarkersVisible(this.selectedDayIndex);
+                },
+                allDay: function() {
+                    this.displayLocations = locations;
+                    this.setMarkersVisible(0);
+                },
+                setMarkersVisible: function (_dIndex) {
+                    if (_dIndex > 0) {
+                        for (var i = 0; i < locations.length; i++) {
+                            var _location = locations[i];
+                            if (_location.dayIndex === _dIndex) {
+                                _location.marker.setVisible(true);
+                            } else {
+                                _location.marker.setVisible(false);
+                            }
+                        }
+                    } else {
+                        for (var i = 0; i < locations.length; i++) {
+                            var _location = locations[i];
+                            _location.marker.setVisible(true);                        }
+
+                    }
+                },
+                getEmbedUrl(videoUrl) {
+                   const videoId = videoUrl.split('v=')[1];
+                    const ampersandPosition = videoId.indexOf('&');
+                    if (ampersandPosition !== -1) {
+                        return 'https://www.youtube.com/embed/' + videoId.substring(0, ampersandPosition);
+                    }
+                    return 'https://www.youtube.com/embed/' + videoId;
+                }
+                
+            }
+        });
+    </script>
+
+</body>
+</html>
